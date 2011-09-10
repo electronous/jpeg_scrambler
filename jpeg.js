@@ -74,11 +74,68 @@ function JpegHeader(jpeg)
 		0xEF: 'APP15',
 	};
 
+	// zigzag order to standard (natural) array order lookup tables
+	var zigzag_natural = {
+		4: [0, 1, 8, 9],
+		9: [0, 1, 8, 16, 9, 2, 10, 17, 18],
+		16: [0, 1, 8, 16, 9, 2, 3, 10,
+			17, 24, 25, 18, 11, 19, 26, 27],
+		25: [0, 1, 8, 16, 9, 2, 3, 10,
+			17, 24, 32, 25, 18, 11, 4, 12,
+			19, 26, 33, 34, 27, 20, 28, 35,
+			36],
+		36: [0, 1, 8, 16, 9, 2, 3, 10,
+			17, 24, 32, 25, 18, 11, 4, 5,
+			12, 19, 26, 33, 40, 41, 34, 27,
+			20, 13, 21, 28, 35, 42, 43, 36,
+			29, 37, 44, 45],
+		49: [0, 1, 8, 16, 9, 2, 3, 10,
+			17, 24, 32, 25, 18, 11, 4,  5,
+			12, 19, 26, 33, 40, 48, 41, 34,
+			27, 20, 13, 6, 14, 21, 28, 35,
+			42, 49, 50, 43, 36, 29, 22, 30,
+			37, 44, 51, 52, 45, 38, 46, 53,
+			54],
+		64: [0, 1, 8, 16, 9, 2, 3, 10,
+			17, 24, 32, 25, 18, 11, 4, 5,
+			12, 19, 26, 33, 40, 48, 41, 34,
+			27, 20, 13, 6, 7, 14, 21, 28,
+			35, 42, 49, 56, 57, 50, 43, 36,
+			29, 22, 15, 23, 30, 37, 44, 51,
+			58, 59, 52, 45, 38, 31, 39, 46,
+			53, 60, 61, 54, 47, 55, 62, 63]
+	};
+
+	var natural_zigzag = {
+		4: [0, 1, 2, 3],
+		9: [0, 1, 5, 2, 4, 6, 3, 7, 8],
+		16: [0, 1, 5, 6, 2, 4, 7, 12,
+			3, 8, 11, 13, 9, 10, 14, 15],
+		25: [0, 1, 5, 6, 14, 2, 4, 7,
+			13, 15, 3, 8, 12, 16, 21, 9, 11,
+			17, 20, 22, 10, 18, 19, 23, 24],
+		36: [0, 1, 5, 6, 14, 15, 2, 4, 7,
+			13, 16, 25, 3, 8, 12, 17, 24, 26,
+			9, 11, 18, 23, 27, 32, 10, 19, 22,
+			28, 31, 33, 20, 21, 29, 30, 34, 35],
+		49: [0, 1, 5, 6, 14, 15, 27, 2, 4, 7,
+			13, 16, 26, 28, 3, 8, 12, 17, 25,
+			29, 38, 9, 11, 18, 24, 30, 37,
+			39, 10, 19, 23, 31, 36, 40, 45, 20,
+			22, 32, 35, 41, 44, 46, 21, 33, 34,
+			42, 43, 47, 48],
+		64: [0, 1, 5, 6, 14, 15, 27, 28, 2, 4,
+			7, 13, 16, 26, 29, 42, 3, 8, 12, 17,
+			25, 30, 41, 43, 9, 11, 18, 24, 31,
+			40, 44, 53, 10, 19, 23, 32, 39, 45,
+			52, 54, 20, 22, 33, 38, 46, 51, 55,
+			60, 21, 34, 37, 47, 50, 56, 59, 61,
+			35, 36, 48, 49, 57, 58, 62, 63]
+	};
+
 	var marker_handlers = {};
 
-
 	// starting decode functions
-
 	function get_marker()
 	{
 		var marker;
@@ -163,8 +220,6 @@ function JpegHeader(jpeg)
 	marker_handlers['SOF14'] = save_generic_vlength;
 	marker_handlers['SOF15'] = save_generic_vlength;
 
-	marker_handlers['DQT'] = save_generic_vlength;
-
 	marker_handlers['APP0'] = save_generic_vlength;
 	marker_handlers['APP14'] = save_generic_vlength;
 
@@ -196,6 +251,90 @@ function JpegHeader(jpeg)
 		return;
 	}
 	marker_handlers['EOI'] = handle_eoi;
+
+	function handle_dqt()
+	{
+		var index_and_prec, quant_index, precision, num_entries;
+		var table, zigzag_lookup;
+		var dqt_dim;
+		var length = get_uint16();
+		jpeg.buffer_index += 2;
+
+		index_and_prec = get_uint8();
+		jpeg.buffer_index += 1;
+		quant_index = index_and_prec & 0x0F;
+		precision = Boolean(index_and_prec >> 4);
+		// XXX check quant_index against max
+
+		num_entries = length - 3;
+		if (precision == true)
+		{
+			num_entries /= 2;
+		}
+
+		table = new Array(num_entries);
+		zigzag_lookup = zigzag_natural[num_entries];
+		if (zigzag_lookup === undefined)
+		{
+			// XXX oh no
+		}
+
+		var i, entry;
+		if (precision == true)
+		{
+			for (i = 0; i < num_entries; ++i)
+			{
+				table[zigzag_lookup[i]] = get_uint16();
+				jpeg.buffer_index += 2;
+			}
+		} else {
+			for (i = 0; i < num_entries; ++i)
+			{
+				table[zigzag_lookup[i]] = get_uint8();
+				jpeg.buffer_index += 1;
+			}
+		}
+
+		that.quantization_index = quant_index;
+		that.quantization_precision = precision;
+		that.quantization_table = table;
+
+		that.inner_toBinaryString = function()
+		{
+			var ret = new Array();
+			var length;
+			var quant_index_and_precision;
+			var natural_lookup;
+			var table_length = that.quantization_table.length;
+			var bytes_per_entry = 1;
+			if (that.quantization_precision == true)
+			{
+				bytes_per_entry = 2;
+			}
+
+			// recalculate length
+			length = 2 + 1 + (bytes_per_entry * table_length);
+
+			ret.push(toBinaryString(length, 2));
+			quant_index_and_precision = that.quantization_index | ((that.quantization_precision * 1) << 4);
+			ret.push(toBinaryString(quant_index_and_precision, 1));
+
+			var i;
+			natural_lookup = natural_zigzag[table_length];
+			if (natural_lookup === undefined)
+			{
+				// XXX oh no
+			}
+			for (i = 0; i < table_length; ++i)
+			{
+				ret.push(toBinaryString(that.quantization_table[natural_lookup[i]], bytes_per_entry));
+			}
+
+			return ret.join('');
+		}
+
+	}
+	marker_handlers['DQT'] = handle_dqt;
 
 	function handle_sos()
 	{
@@ -234,6 +373,23 @@ function JpegHeader(jpeg)
 		low = jpeg.buffer.charCodeAt(jpeg.buffer_index + 1);
 		value = ((high << 8) & 0xFF00) | (low & 0x00FF);
 		return value;
+	}
+
+	function toBinaryString(number, length)
+	{
+		if (length < 0)
+		{
+			// XXX :(
+		}
+		var ret = new Array();
+		while (length > 0)
+		{
+			ret.push(String.fromCharCode(number & 0xff));
+			number >>= 8;
+			length -= 1;
+		}
+		ret.reverse();
+		return ret.join('');
 	}
 
 	this.save = true;
