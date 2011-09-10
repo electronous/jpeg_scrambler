@@ -24,11 +24,11 @@ function MarkerNotRecognizedError(code)
 	};
 }
 
-function decodeJpeg(raw)
+// if jpeg.buffer and jpeg.buffer_index exist, then we build a header from
+// the buffer, otherwise we simply build a new header de novo
+function JpegHeader(jpeg)
 {
-	var marker;
-	var _index = 0;
-
+	var that = this;
 	var markers = {
 		0xC0: 'SOF0',
 		0xC1: 'SOF1',
@@ -75,86 +75,26 @@ function decodeJpeg(raw)
 	};
 
 	var marker_handlers = {};
-	marker_handlers['SOF0'] = handle_sof0;
-	marker_handlers['SOF1'] = handle_sof1;
-	marker_handlers['SOF2'] = handle_sof2;
-	marker_handlers['SOF3'] = handle_sof3;
-	
-	marker_handlers['DHT'] = handle_dht;
-	
-	marker_handlers['SOF5'] = handle_sof5;
-	marker_handlers['SOF6'] = handle_sof6;
-	marker_handlers['SOF7'] = handle_sof7;
-	marker_handlers['SOF_JPEG'] = handle_sof_jpeg;
-	marker_handlers['SOF9'] = handle_sof9;
-	marker_handlers['SOF10'] = handle_sof10;
-	marker_handlers['SOF11'] = handle_sof11;
-	
-	marker_handlers['DAC'] = handle_dac;
-	
-	marker_handlers['SOF13'] = handle_sof13;
-	marker_handlers['SOF14'] = handle_sof14;
-	marker_handlers['SOF15'] = handle_sof15;
 
-	marker_handlers['SOI'] = handle_soi;
-	marker_handlers['EOI'] = handle_eoi;
-	marker_handlers['SOS'] = handle_sos;
-	marker_handlers['DQT'] = handle_dqt;
-
-	marker_handlers['APP0'] = handle_app0;
-	marker_handlers['APP1'] = handle_generic_vlength;
-	marker_handlers['APP2'] = handle_generic_vlength;
-	marker_handlers['APP3'] = handle_generic_vlength;
-	marker_handlers['APP4'] = handle_generic_vlength;
-	marker_handlers['APP5'] = handle_generic_vlength;
-	marker_handlers['APP6'] = handle_generic_vlength;
-	marker_handlers['APP7'] = handle_generic_vlength;
-	marker_handlers['APP8'] = handle_generic_vlength;
-	marker_handlers['APP9'] = handle_generic_vlength;
-	marker_handlers['APP10'] = handle_generic_vlength;
-	marker_handlers['APP11'] = handle_generic_vlength;
-	marker_handlers['APP12'] = handle_generic_vlength;
-	marker_handlers['APP13'] = handle_generic_vlength;
-	marker_handlers['APP14'] = handle_app14;
-	marker_handlers['APP15'] = handle_generic_vlength;
-
-	this.trackers = {};
-
-	start_decoding();
-
-	function start_decoding()
-	{
-		marker = get_marker();
-		if (marker != 'SOI')
-		{
-			throw NotJpegFileError;
-		}
-		handle_marker(marker);
-
-		while (marker != 'EOI')
-		{
-			marker = get_marker();
-			handle_marker(marker);
-		}
-	}
 
 	// starting decode functions
 
 	function get_marker()
 	{
-		var marker_code, marker;
+		var marker;
 		if (get_uint8() != 0xFF)
 		{
 			throw new MarkerFirstByteError();
 		}
-		_index += 1;
-		marker_code = get_uint8();
-		marker = markers[marker_code];
+		jpeg.buffer_index += 1;
+		that.marker_code = get_uint8();
+		marker = markers[that.marker_code];
 		if (marker === undefined)
 		{
-			throw new MarkerNotRecognizedError(marker_code.toString(16));
+			throw new MarkerNotRecognizedError(that.marker_code.toString(16));
 		}
-		_index += 1;
+		jpeg.buffer_index += 1;
+		that.marker_name = marker;
 		return marker;
 	}
 
@@ -165,23 +105,68 @@ function decodeJpeg(raw)
 		{
 			throw new MarkerNotHandledError(marker);
 		}
-		tracker = this.trackers[marker];
-		if (tracker === undefined)
-		{
-			tracker = new Array();
-		}
-		tracker.push(_index);
-		this.trackers[marker] = tracker;
 		return handler();
 	}
 
 	// this will simply pass by any headers that are variable length
 	// useful for uninteresting headers
-	function handle_generic_vlength()
+	function skip_generic_vlength()
 	{
 		// first field is a unsigned, 2-byte length field
-		_index += get_uint16();
+		jpeg.buffer_index += get_uint16();
+		that.save = false;
 	}
+	marker_handlers['APP1'] = skip_generic_vlength;
+	marker_handlers['APP2'] = skip_generic_vlength;
+	marker_handlers['APP3'] = skip_generic_vlength;
+	marker_handlers['APP4'] = skip_generic_vlength;
+	marker_handlers['APP5'] = skip_generic_vlength;
+	marker_handlers['APP6'] = skip_generic_vlength;
+	marker_handlers['APP7'] = skip_generic_vlength;
+	marker_handlers['APP8'] = skip_generic_vlength;
+	marker_handlers['APP9'] = skip_generic_vlength;
+	marker_handlers['APP10'] = skip_generic_vlength;
+	marker_handlers['APP11'] = skip_generic_vlength;
+	marker_handlers['APP12'] = skip_generic_vlength;
+	marker_handlers['APP13'] = skip_generic_vlength;
+	marker_handlers['APP15'] = skip_generic_vlength;
+
+
+	function save_generic_vlength()
+	{
+		var length = get_uint16();
+		that._buf = jpeg.buffer.slice(jpeg.buffer_index, jpeg.buffer_index + length);
+		that.inner_toBinaryString = function()
+		{
+			return that._buf;
+		}
+		jpeg.buffer_index += length;
+	}
+	marker_handlers['SOF0'] = save_generic_vlength;
+	marker_handlers['SOF1'] = save_generic_vlength;
+	marker_handlers['SOF2'] = save_generic_vlength;
+	marker_handlers['SOF3'] = save_generic_vlength;
+	
+	marker_handlers['DHT'] = save_generic_vlength;
+	
+	marker_handlers['SOF5'] = save_generic_vlength;
+	marker_handlers['SOF6'] = save_generic_vlength;
+	marker_handlers['SOF7'] = save_generic_vlength;
+	marker_handlers['SOF_JPEG'] = save_generic_vlength;
+	marker_handlers['SOF9'] = save_generic_vlength;
+	marker_handlers['SOF10'] = save_generic_vlength;
+	marker_handlers['SOF11'] = save_generic_vlength;
+
+	marker_handlers['DAC'] = save_generic_vlength;
+
+	marker_handlers['SOF13'] = save_generic_vlength;
+	marker_handlers['SOF14'] = save_generic_vlength;
+	marker_handlers['SOF15'] = save_generic_vlength;
+
+	marker_handlers['DQT'] = save_generic_vlength;
+
+	marker_handlers['APP0'] = save_generic_vlength;
+	marker_handlers['APP14'] = save_generic_vlength;
 
 	function handle_sof(options)
 	{
@@ -200,14 +185,35 @@ function decodeJpeg(raw)
 
 	function handle_soi()
 	{
+		// all default settings ok
 		return;
 	}
+	marker_handlers['SOI'] = handle_soi;
+
+	function handle_eoi()
+	{
+		// all default settings ok
+		return;
+	}
+	marker_handlers['EOI'] = handle_eoi;
+
+	function handle_sos()
+	{
+		// XXX gimmicky hack
+		that._buf = jpeg.buffer.slice(jpeg.buffer_index, -2);
+		that.inner_toBinaryString = function()
+		{
+			return that._buf;
+		}
+		jpeg.buffer_index += that._buf.length;
+	}
+	marker_handlers['SOS'] = handle_sos;
 
 	function handle_app0()
 	{
 		var length;
 		length = get_uint16();
-		_index += 2;
+		jpeg.buffer_index += 2;
 
 		return;
 	}
@@ -218,18 +224,67 @@ function decodeJpeg(raw)
 	// get_uint8
 	function get_uint8()
 	{
-		return raw.charCodeAt(_index);
+		return jpeg.buffer.charCodeAt(jpeg.buffer_index);
 	}
 
 	function get_uint16()
 	{
 		var high, low, value;
-		high = raw.charCodeAt(_index);
-		low = raw.charCodeAt(_index + 1);
+		high = jpeg.buffer.charCodeAt(jpeg.buffer_index);
+		low = jpeg.buffer.charCodeAt(jpeg.buffer_index + 1);
 		value = ((high << 8) & 0xFF00) | (low & 0x00FF);
 		return value;
 	}
+
+	this.save = true;
+	this.marker_code = 0;
+	this.marker_name = "";
+	this.inner_toBinaryString = function() { return ''; };
+	this.toBinaryString = function()
+	{
+		return String.fromCharCode(0xFF) + String.fromCharCode(this.marker_code) + this.inner_toBinaryString();
+	};
+
+	handle_marker(get_marker());
 }
+
+function Jpeg(buffer)
+{
+	this.buffer = buffer;
+	this.buffer_index = 0;
+
+	this.headers = new Array();
+	var header;
+	
+	header = new JpegHeader(this);
+	if (header.marker_name != 'SOI')
+	{
+		throw NotJpegFileError;
+	}
+	this.headers.push(header);
+	while (header.marker_name != 'EOI')
+	{
+		header = new JpegHeader(this);
+		if (header.save == true)
+		{
+			this.headers.push(header);
+		}
+	}
+
+	this.toBinaryString = function()
+	{
+		var bstrings = new Array();
+		var len = this.headers.length;
+		var i;
+		for (i = 0; i < len; ++i)
+		{
+			bstrings.push(this.headers[i].toBinaryString());
+		}
+		return bstrings.join('');
+	}
+}
+
+
 
 var base64_values = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -314,8 +369,8 @@ function handleFileSelect(evt)
 
 	function handleBinary()
 	{
-		//decodeJpeg(reader.result);
-		var b64_input = binaryStringToBase64(reader.result);
+		var jpeg = new Jpeg(reader.result);
+		var b64_input = binaryStringToBase64(jpeg.toBinaryString());
 		var img_pieces = new Array();
 		img_pieces.push('<img src="data:image/jpeg;base64,');
 		img_pieces.push(b64_input.join(''));
