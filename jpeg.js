@@ -526,12 +526,31 @@ function handleFileSelect(evt)
 	function handleBinary()
 	{
 		var jpeg = new Jpeg(reader.result);
+		var length = jpeg.headers.length;
+		var i, j, dqt_header, table_length;
+		for (i = 0; i < length; ++i)
+		{
+			if (jpeg.headers[i].marker_name == 'DQT')
+			{
+				dqt_header = jpeg.headers[i];
+				table_length = dqt_header.quantization_table.length;
+				for (j = 0; j < table_length; ++j)
+				{
+					dqt_header.quantization_table[j] = getRandomInt(5, 8);
+				}
+			}
+		}
 		var b64_input = binaryStringToBase64(jpeg.toBinaryString());
 		var img_pieces = new Array();
 		img_pieces.push('<img src="data:image/jpeg;base64,');
 		img_pieces.push(b64_input.join(''));
 		img_pieces.push('" >');
 		$('#text_here').html(img_pieces.join(''));
+	}
+
+	function getRandomInt(min, max)
+	{
+		return Math.floor(Math.random() * (max - min + 1)) + min;
 	}
 
 }
