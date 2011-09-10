@@ -536,7 +536,7 @@ function handleFileSelect(evt)
 				table_length = dqt_header.quantization_table.length;
 				for (j = 0; j < table_length; ++j)
 				{
-					dqt_header.quantization_table[j] = getRandomInt(5, 8);
+					dqt_header.quantization_table[j] = getRandomInt(5, 80);
 				}
 			}
 		}
